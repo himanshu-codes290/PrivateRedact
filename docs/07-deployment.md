@@ -46,12 +46,14 @@ The repo is on GitHub, so this is the zero-cost option. The site is served under
    `start_url`/`scope` with that base.
 2. Copies `dist/index.html` to `dist/404.html`, so deep links such as `/PrivateRedact/redact` load
    the app on refresh (GitHub Pages has no rewrite rules; it serves `404.html` for unknown paths).
-3. `actions/configure-pages` (with `enablement: true`, which turns Pages on the first time),
-   `actions/upload-pages-artifact` and `actions/deploy-pages`. The `deploy` job targets the
-   `github-pages` environment, so each run's summary links to the live URL.
+3. `actions/configure-pages`, `actions/upload-pages-artifact` and `actions/deploy-pages`. The
+   `deploy` job targets the `github-pages` environment, so each run's summary links to the live
+   URL.
 
-One-time check in the repository settings: **Settings → Pages → Source** must be "GitHub Actions".
-If the first run fails at `configure-pages`, set that manually and re-run the workflow.
+One-time setup in the repository: **Settings → Pages → Build and deployment → Source** must be
+"GitHub Actions". The workflow's own token cannot create the Pages site (the first run failed at
+`configure-pages` for exactly that reason), so this is a manual click, after which every push to
+`main` deploys.
 
 Limitations: GitHub Pages cannot set custom headers, so the `<meta>` CSP is the enforcement
 (no `frame-ancestors`), and the site is public, which is fine because it holds no data.

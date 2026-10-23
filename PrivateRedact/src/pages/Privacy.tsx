@@ -24,6 +24,12 @@ const SECTIONS: { title: string; body: string[] }[] = [
     ],
   },
   {
+    title: 'Links to other sites',
+    body: [
+      'The Support page and the results page link to GitHub Sponsors, and several pages link to the GitHub repository. Those are ordinary links that open in a new tab only when you click them: nothing from those sites is loaded here, and no information about you or your files is sent to them. Once there, their own privacy policies apply.',
+    ],
+  },
+  {
     title: 'Verify it yourself',
     body: [
       'Open your browser’s developer tools, switch to the Network tab and redact a file: no request carries your document. The full source code is public.',

@@ -31,10 +31,10 @@ see the [documentation](../docs/README.md).
 ```
 src/
   main.tsx, Routes.tsx        app entry, lazy routes, error boundary
-  config.ts                   repo/docs URLs (no secrets: there is no backend)
+  config.ts                   repo/docs/support URLs (no secrets: there is no backend)
   components/                 Layout, ErrorBoundary
   hooks/                      useLatest, useFocusTrap
-  pages/                      Home, Redact, Privacy, NotFound
+  pages/                      Home, Redact, Privacy, Support, NotFound
   features/redact/
     engine/                   pdf-lib redaction engine (no DOM, runs in worker + Node)
       tokenizer.ts            content-stream lexer with byte ranges

@@ -6,6 +6,8 @@ import userEvent from '@testing-library/user-event';
 import { renderHook } from '@testing-library/react';
 import { ConfirmRedactionDialog } from './ConfirmRedactionDialog';
 import { PageThumbnails } from './PageThumbnails';
+import { SupportDialog } from './SupportDialog';
+import { SUPPORT_CARD_HIDDEN_KEY, isSupportCardHidden } from '../lib/supportCard';
 import { useWorkspaceShortcuts, type ShortcutHandlers } from '../hooks/useWorkspaceShortcuts';
 
 const file = { name: 'a.pdf', index: 1, total: 3, boxes: 2, pages: 1 };
@@ -63,6 +65,41 @@ describe('ConfirmRedactionDialog', () => {
     dialog({ error: 'encrypted' });
     expect(screen.getByRole('alert')).toHaveTextContent('encrypted');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+});
+
+describe('SupportDialog', () => {
+  it('is a modal with an outbound sponsor link; Continue and Escape dismiss it', async () => {
+    const user = userEvent.setup();
+    const onContinue = vi.fn();
+    render(<SupportDialog fileCount={2} onContinue={onContinue} />);
+    const modal = screen.getByRole('dialog', { name: 'Enjoying PrivateRedact?' });
+    expect(modal).toHaveAttribute('aria-modal', 'true');
+    expect(modal).toHaveTextContent('2 files redacted on your device');
+    const sponsor = screen.getByRole('link', { name: 'Sponsor on GitHub' });
+    expect(sponsor).toHaveFocus();
+    expect(sponsor).toHaveAttribute(
+      'href',
+      expect.stringMatching(/^https:\/\/github\.com\/sponsors\//),
+    );
+    expect(sponsor).toHaveAttribute('target', '_blank');
+    expect(sponsor).toHaveAttribute('rel', 'noopener noreferrer');
+
+    await user.keyboard('{Escape}');
+    expect(onContinue).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole('button', { name: 'Continue to your files' }));
+    expect(onContinue).toHaveBeenCalledTimes(2);
+    expect(isSupportCardHidden()).toBe(false);
+  });
+
+  it('remembers "don’t show this again" in localStorage', async () => {
+    const user = userEvent.setup();
+    onTestFinished(() => localStorage.removeItem(SUPPORT_CARD_HIDDEN_KEY));
+    render(<SupportDialog fileCount={1} onContinue={vi.fn()} />);
+    await user.click(screen.getByRole('checkbox', { name: 'Don’t show this again' }));
+    await user.click(screen.getByRole('button', { name: 'Continue to your files' }));
+    expect(localStorage.getItem(SUPPORT_CARD_HIDDEN_KEY)).toBe('1');
+    expect(isSupportCardHidden()).toBe(true);
   });
 });
 

@@ -40,6 +40,21 @@ export const applyButton = (page: Page): Locator =>
 export const confirmDialog = (page: Page): Locator =>
   page.getByRole('dialog', { name: 'Apply redactions' });
 
+export const supportDialog = (page: Page): Locator =>
+  page.getByRole('dialog', { name: 'Enjoying PrivateRedact?' });
+
+/**
+ * After a redaction run the support card covers the results. Dismiss it and
+ * assert the results headline ("N redacted file(s) ready").
+ */
+export async function continueToResults(page: Page, files: number): Promise<void> {
+  await supportDialog(page).getByRole('button', { name: 'Continue to your files' }).click();
+  await expect(supportDialog(page)).toBeHidden();
+  await expect(
+    page.getByRole('heading', { name: `${files} redacted file${files === 1 ? '' : 's'} ready` }),
+  ).toBeVisible();
+}
+
 export async function expectBoxCount(page: Page, boxes: number, files = 1): Promise<void> {
   if (boxes === 0) {
     await expect(statusBar(page)).toContainText('Draw boxes over anything you want removed');

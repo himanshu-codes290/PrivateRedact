@@ -23,6 +23,31 @@ test.describe('Navigation', () => {
     await expect(page.getByRole('link', { name: 'Start redacting' })).toBeVisible();
   });
 
+  test('support page links out to GitHub Sponsors without loading anything from it', async ({
+    page,
+  }) => {
+    const external: string[] = [];
+    page.on('request', (req) => {
+      if (!new URL(req.url()).origin.startsWith('http://localhost')) external.push(req.url());
+    });
+    await page.goto('/');
+    await page
+      .getByRole('navigation', { name: 'Main' })
+      .getByRole('link', { name: 'Support' })
+      .click();
+    await expect(page).toHaveURL(/\/support$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Support the project' }),
+    ).toBeVisible();
+
+    const sponsor = page.getByRole('link', { name: 'Sponsor on GitHub' });
+    await expect(sponsor).toHaveAttribute('href', /^https:\/\/github\.com\/sponsors\//);
+    await expect(sponsor).toHaveAttribute('target', '_blank');
+    await expect(sponsor).toHaveAttribute('rel', /noopener/);
+    await page.waitForLoadState('networkidle');
+    expect(external).toEqual([]);
+  });
+
   test('unknown routes show the not-found page', async ({ page }) => {
     await page.goto('/does-not-exist');
     await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();

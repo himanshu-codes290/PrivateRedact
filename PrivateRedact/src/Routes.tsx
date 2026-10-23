@@ -9,6 +9,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 // when the user opens the workspace, never on the landing page.
 const Redact = lazy(() => import('./pages/Redact'));
 const Privacy = lazy(() => import('./pages/Privacy'));
+const Support = lazy(() => import('./pages/Support'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 function RouteFallback() {
@@ -30,6 +31,7 @@ export function AppRoutes() {
             <Route path="/" element={<Home />} />
             <Route path="/redact" element={<Redact />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/support" element={<Support />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>

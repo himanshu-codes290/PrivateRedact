@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, NavLink, useLocation } from 'react-router';
-import { Shield } from 'lucide-react';
+import { Heart, Shield } from 'lucide-react';
 import { APP_NAME, REPO_URL } from '@/config';
 
 interface LayoutProps {
@@ -64,6 +64,15 @@ export function Layout({ children }: LayoutProps) {
             >
               Privacy
             </NavLink>
+            <NavLink
+              to="/support"
+              className={({ isActive }) =>
+                `flex items-center gap-1.5 transition-colors hover:text-white ${isActive ? 'text-white' : ''}`
+              }
+            >
+              <Heart className="h-3.5 w-3.5 text-amber-400" aria-hidden="true" />
+              Support
+            </NavLink>
           </div>
 
           <Link
@@ -92,6 +101,9 @@ export function Layout({ children }: LayoutProps) {
             <nav className="flex gap-6" aria-label="Footer">
               <Link to="/privacy" className="transition-colors hover:text-gray-300">
                 Privacy
+              </Link>
+              <Link to="/support" className="transition-colors hover:text-gray-300">
+                Support
               </Link>
               <a
                 href={REPO_URL}

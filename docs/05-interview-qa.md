@@ -202,7 +202,7 @@ browser or extension is out of scope. See `SECURITY.md`.
 Fixtures are generated in the tests with pdf-lib's low-level API, so each test hand-writes the
 operators it needs (shared streams, forms, CID fonts, hostile input). Assertions use two oracles:
 a leak scanner that decodes every object and searches for the secret in several encodings, and
-PDF.js text extraction to check that kept text survives at the same coordinates. 82 tests;
+PDF.js text extraction to check that kept text survives at the same coordinates. 84 tests;
 about 90 % line coverage on the engine.
 
 **Q35. How do you know your tests would catch the original bugs?**

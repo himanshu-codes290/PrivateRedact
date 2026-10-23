@@ -25,6 +25,8 @@ import { PdfViewer, type RenderedPage } from './PdfViewer';
 import { FabricOverlay, type RedactOverlayHandle } from './FabricOverlay';
 import { ConfirmRedactionDialog } from './ConfirmRedactionDialog';
 import { DownloadPage } from './DownloadPage';
+import { SupportDialog } from './SupportDialog';
+import { isSupportCardHidden } from '@/features/redact/lib/supportCard';
 import { PageThumbnails } from './PageThumbnails';
 
 /** Stable empty map so thumbnails of a file without boxes do not re-render. */
@@ -85,6 +87,8 @@ export function RedactWorkspace({ files, onFilesChange, onStartOver }: RedactWor
   const [confirm, setConfirm] = useState<ConfirmState>(IDLE_CONFIRM);
   const [results, setResults] = useState<DownloadItem[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
+  /** Thank-you card shown over the results once a redaction run finishes. */
+  const [supportCard, setSupportCard] = useState(false);
 
   const overlayRef = useRef<RedactOverlayHandle>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
@@ -244,6 +248,7 @@ export function RedactWorkspace({ files, onFilesChange, onStartOver }: RedactWor
     stopWorker();
     setConfirm(IDLE_CONFIRM);
     setPhase('download');
+    setSupportCard(!isSupportCardHidden());
   };
 
   const beginApply = () => {
@@ -339,12 +344,17 @@ export function RedactWorkspace({ files, onFilesChange, onStartOver }: RedactWor
 
   if (phase === 'download') {
     return (
-      <DownloadPage
-        items={results}
-        skipped={skipped}
-        onEditRedactions={backToEditing}
-        onStartOver={onStartOver}
-      />
+      <>
+        <DownloadPage
+          items={results}
+          skipped={skipped}
+          onEditRedactions={backToEditing}
+          onStartOver={onStartOver}
+        />
+        {supportCard && results.length > 0 && (
+          <SupportDialog fileCount={results.length} onContinue={() => setSupportCard(false)} />
+        )}
+      </>
     );
   }
 

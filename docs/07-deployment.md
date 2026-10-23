@@ -33,18 +33,36 @@ Permissions-Policy: camera=(), microphone=(), geolocation=()
 Cross-Origin-Opener-Policy: same-origin
 ```
 
-## Option A: GitHub Pages
+## Option A: GitHub Pages (the live deployment)
 
-The repo is on GitHub, so this is the zero-cost option. The site is served under `/PrivateRedact/`.
+The repo is on GitHub, so this is the zero-cost option. The site is served under `/PrivateRedact/`:
+**https://himanshu-codes290.github.io/PrivateRedact/**
 
-1. Build with `VITE_BASE_PATH=/PrivateRedact/`.
-2. Copy `dist/index.html` to `dist/404.html`, so deep links load the app (GitHub Pages has no
-   rewrite rules).
-3. Deploy `dist/` with `actions/upload-pages-artifact` and `actions/deploy-pages` in a workflow
-   that runs after CI.
+`.github/workflows/deploy-pages.yml` runs on every push to `main` (and on demand via
+"Run workflow"):
 
-Limitation: GitHub Pages cannot set custom headers, so the `<meta>` CSP is the enforcement
-(no `frame-ancestors`).
+1. `npm ci` and `npm run build` with `VITE_BASE_PATH=/<repo name>/`. Vite prefixes every asset,
+   the router `basename`, the PDF.js asset URLs, the service-worker fallback and the manifest
+   `start_url`/`scope` with that base.
+2. Copies `dist/index.html` to `dist/404.html`, so deep links such as `/PrivateRedact/redact` load
+   the app on refresh (GitHub Pages has no rewrite rules; it serves `404.html` for unknown paths).
+3. `actions/configure-pages` (with `enablement: true`, which turns Pages on the first time),
+   `actions/upload-pages-artifact` and `actions/deploy-pages`. The `deploy` job targets the
+   `github-pages` environment, so each run's summary links to the live URL.
+
+One-time check in the repository settings: **Settings → Pages → Source** must be "GitHub Actions".
+If the first run fails at `configure-pages`, set that manually and re-run the workflow.
+
+Limitations: GitHub Pages cannot set custom headers, so the `<meta>` CSP is the enforcement
+(no `frame-ancestors`), and the site is public, which is fine because it holds no data.
+
+Local check of a sub-path build (Git Bash on Windows rewrites `/PrivateRedact/` into a Windows
+path unless path conversion is off):
+
+```bash
+MSYS_NO_PATHCONV=1 VITE_BASE_PATH=/PrivateRedact/ npm run build
+npm run preview        # http://localhost:4173/PrivateRedact/
+```
 
 ## Option B: Netlify or Vercel
 

@@ -4,6 +4,9 @@ Permanently redact PDFs **in your browser**. Mark what to hide, and PrivateRedac
 file itself, not just paints a black box over it. Nothing is uploaded: there is no server.
 
 [![CI](https://github.com/himanshu-codes290/PrivateRedact/actions/workflows/ci.yml/badge.svg)](https://github.com/himanshu-codes290/PrivateRedact/actions/workflows/ci.yml)
+[![Deploy](https://github.com/himanshu-codes290/PrivateRedact/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/himanshu-codes290/PrivateRedact/actions/workflows/deploy-pages.yml)
+
+**Live:** https://himanshu-codes290.github.io/PrivateRedact/
 
 ## What it does
 

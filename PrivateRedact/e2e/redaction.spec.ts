@@ -2,12 +2,14 @@ import { expect, test } from '@playwright/test';
 import {
   applyButton,
   confirmDialog,
+  continueToResults,
   downloadBytes,
   downloadFrom,
   drawBox,
   expectBoxCount,
   openWorkspace,
   queuePanel,
+  supportDialog,
   waitForPageRender,
 } from './support/app';
 import {
@@ -38,7 +40,15 @@ test.describe('Redaction pipeline', () => {
 
     await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
 
-    await expect(page.getByRole('heading', { name: '1 redacted file ready' })).toBeVisible();
+    // A thank-you card covers the results first. Its sponsor link is a plain
+    // outbound link; Continue reveals the files.
+    const card = supportDialog(page);
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('1 file redacted on your device');
+    const sponsor = card.getByRole('link', { name: 'Sponsor on GitHub' });
+    expect(await sponsor.getAttribute('href')).toContain('https://github.com/sponsors/');
+    await expect(sponsor).toHaveAttribute('target', '_blank');
+    await continueToResults(page, 1);
     const row = page.getByRole('listitem').filter({ hasText: 'report_redacted.pdf' });
     await expect(row).toContainText('Verified');
     await expect(row).toContainText(`${SECRET_LINE.text.length} characters removed`);
@@ -59,7 +69,7 @@ test.describe('Redaction pipeline', () => {
     await drawBox(page, boxFor(SECRET_LINE));
     await applyButton(page).click();
     await confirmDialog(page).getByRole('button', { name: 'Apply', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '1 redacted file ready' })).toBeVisible();
+    await continueToResults(page, 1);
 
     const row = page.getByRole('listitem').filter({ hasText: 'doc_redacted.pdf' });
     const bytes = await downloadBytes(
@@ -82,7 +92,7 @@ test.describe('Redaction pipeline', () => {
 
     await applyButton(page).click();
     await confirmDialog(page).getByRole('button', { name: 'Apply', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '1 redacted file ready' })).toBeVisible();
+    await continueToResults(page, 1);
 
     await page.getByRole('button', { name: 'Edit boxes' }).click();
     await waitForPageRender(page);
@@ -110,7 +120,7 @@ test.describe('Redaction pipeline', () => {
     await expect(dialog).toContainText('1 of 2');
     await dialog.getByRole('button', { name: 'Apply to all 2' }).click();
 
-    await expect(page.getByRole('heading', { name: '2 redacted files ready' })).toBeVisible();
+    await continueToResults(page, 2);
     await expect(page.getByText('first_redacted.pdf')).toBeVisible();
     await expect(page.getByText('second_redacted.pdf')).toBeVisible();
     await expect(page.getByText('Verified')).toHaveCount(2);
@@ -147,7 +157,7 @@ test.describe('Redaction pipeline', () => {
     await expect(dialog).toContainText('2 of 2');
     await dialog.getByRole('button', { name: 'Skip file' }).click();
 
-    await expect(page.getByRole('heading', { name: '1 redacted file ready' })).toBeVisible();
+    await continueToResults(page, 1);
     await expect(page.getByText('keep_redacted.pdf')).toBeVisible();
     await expect(page.getByText('Not included (skipped or no boxes): skip.pdf')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Download all (.zip)' })).toBeHidden();
@@ -164,7 +174,7 @@ test.describe('Redaction pipeline', () => {
     await expect(dialog).toContainText('1 of 1');
     await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
 
-    await expect(page.getByRole('heading', { name: '1 redacted file ready' })).toBeVisible();
+    await continueToResults(page, 1);
     await expect(page.getByText('Not included (skipped or no boxes): untouched.pdf')).toBeVisible();
 
     await page.getByRole('button', { name: 'Start over' }).click();

@@ -37,7 +37,7 @@ There is no server. The "system" is three JavaScript threads inside one browser 
 | --------------- | ------------------------------------------------------------ | ---------------------------------------------- |
 | `/`             | `index` chunk (~252 KB, 80 KB gzip)                          | Landing page only.                             |
 | `/redact`       | `Redact` chunk (Fabric + workspace) and `pdf` chunk (PDF.js) | Lazy via `React.lazy`. Workers load on demand. |
-| `/privacy`, `*` | Tiny chunks                                                  | 404 page for unknown routes.                   |
+| `/privacy`, `/support`, `*` | Tiny chunks                                      | Support links out to GitHub Sponsors (plain link, no widget: the CSP forbids third-party scripts). 404 page for unknown routes. |
 
 Before the refactor everything (PDF.js, Fabric, pdf-lib) shipped in one 1.45 MB chunk on the landing
 page. Now pdf-lib lives only in the worker chunk.
@@ -77,7 +77,10 @@ the workspace a small phase machine drives the pipeline:
 - **processing:** the worker job runs; Cancel terminates the worker. A **session counter** is
   incremented on cancel, edit-again and unmount; every `await` checks it, so late results from an
   abandoned job are ignored instead of being written into state.
-- **download:** per-file report, verification badge, preview, download, ZIP.
+- **download:** per-file report, verification badge, preview, download, ZIP. A thank-you card
+  (`SupportDialog`) covers the results first, with a plain GitHub Sponsors link and a Continue
+  button; "Don't show this again" is remembered in `localStorage` (wrapped in try/catch, so a
+  private window simply shows it again).
 
 ## State management
 

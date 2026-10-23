@@ -6,11 +6,13 @@ import {
   ExternalLink,
   FileArchive,
   FileText,
+  Heart,
   Info,
   PencilLine,
   ShieldAlert,
   TriangleAlert,
 } from 'lucide-react';
+import { SUPPORT } from '@/config';
 import type { RedactReport } from '@/features/redact/engine';
 import {
   buildZip,
@@ -188,6 +190,23 @@ export function DownloadPage({ items, skipped, onEditRedactions, onStartOver }: 
             </div>
           </div>
         </div>
+
+        {/* An outbound link (new tab) rather than a route: navigating away from
+            /redact would unmount the workspace and discard these results. */}
+        {items.length > 0 && (
+          <p className="mt-6 text-center text-[12.5px] text-gray-500">
+            Found this useful? The app is free and tracker-free.{' '}
+            <a
+              href={SUPPORT.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-amber-300/90 underline-offset-2 hover:text-amber-200 hover:underline"
+            >
+              <Heart className="h-3.5 w-3.5" aria-hidden="true" />
+              {SUPPORT.label}
+            </a>
+          </p>
+        )}
       </div>
     </div>
   );

@@ -1,162 +1,267 @@
-import { FileText, CheckCircle, Download, ShieldCheck, ArrowLeft, ArrowRight } from 'lucide-react';
-
-/** A file that has been confirmed and fully redacted. */
-export interface DownloadItem {
-  fileId: string;
-  /** Original uploaded file name. */
-  name: string;
-  /** Redacted blob URL — revoked by the parent on unmount / re-run. */
-  url: string;
-}
+import { useEffect, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  CircleCheck,
+  Download,
+  ExternalLink,
+  FileArchive,
+  FileText,
+  Info,
+  PencilLine,
+  ShieldAlert,
+  TriangleAlert,
+} from 'lucide-react';
+import type { RedactReport } from '@/features/redact/engine';
+import {
+  buildZip,
+  bytesToObjectUrl,
+  redactedFileName,
+  triggerDownload,
+} from '@/features/redact/lib/download';
+import { fileStatus, type DownloadItem, type FileStatus } from '@/features/redact/lib/results';
 
 interface DownloadPageProps {
-  items: DownloadItem[];
-  /** Files that were auto-skipped because they had no redactions. */
-  skippedCount: number;
+  items: readonly DownloadItem[];
+  /** Names of files that were skipped or had no boxes. */
+  skipped: readonly string[];
   onEditRedactions: () => void;
-  onBackToUpload: () => void;
+  onStartOver: () => void;
 }
 
-/** `report.pdf` → `report_redacted.pdf`. */
-export function redactedFileName(name: string): string {
-  return name.replace(/\.pdf$/i, '') + '_redacted.pdf';
+function summary(r: RedactReport): string {
+  const parts = [`${r.glyphsRemoved} character${r.glyphsRemoved === 1 ? '' : 's'} removed`];
+  if (r.imagesRemoved) parts.push(`${r.imagesRemoved} image${r.imagesRemoved === 1 ? '' : 's'}`);
+  if (r.annotationsRemoved)
+    parts.push(`${r.annotationsRemoved} annotation${r.annotationsRemoved === 1 ? '' : 's'}`);
+  if (r.formFlattened) parts.push('form flattened');
+  return parts.join(' · ');
 }
 
-/** Programmatic anchor download (no server, no navigation). */
-function triggerDownload(url: string, fileName: string) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+/** Final stage: per-file results, warnings, preview and download. */
+export function DownloadPage({ items, skipped, onEditRedactions, onStartOver }: DownloadPageProps) {
+  const [zipping, setZipping] = useState(false);
+  const pendingRevokes = useRef<{ url: string; timer: ReturnType<typeof setTimeout> }[]>([]);
 
-/**
- * Final stage after every redacted file has been confirmed. Lists ONLY the
- * confirmed files with per-file downloads wired to their Blob URLs.
- */
-export function DownloadPage({ items, skippedCount, onEditRedactions, onBackToUpload }: DownloadPageProps) {
-  const downloadAll = () => {
-    // Sequential clicks; a tiny gap avoids browser throttling when many files.
-    items.forEach((item, i) => {
-      setTimeout(() => triggerDownload(item.url, redactedFileName(item.name)), i * 250);
-    });
+  useEffect(() => {
+    const pending = pendingRevokes.current;
+    return () => {
+      for (const p of pending) {
+        clearTimeout(p.timer);
+        URL.revokeObjectURL(p.url);
+      }
+    };
+  }, []);
+
+  const downloadZip = () => {
+    setZipping(true);
+    // Let the button repaint before the (synchronous) zip work.
+    setTimeout(() => {
+      try {
+        const zip = buildZip(
+          items.map((i) => ({ name: redactedFileName(i.name), bytes: i.bytes })),
+        );
+        const url = bytesToObjectUrl(zip, 'application/zip');
+        triggerDownload(url, 'redacted-documents.zip');
+        // The download has started by now; revoke once the browser is done reading it.
+        const timer = setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        pendingRevokes.current.push({ url, timer });
+      } finally {
+        setZipping(false);
+      }
+    }, 0);
   };
 
-  return (
-    <div className="min-h-[calc(100vh-65px)] bg-[#06060f] relative overflow-hidden">
-      <div className="absolute inset-0 dot-grid pointer-events-none opacity-50" />
-      <div className="absolute top-1/4 right-[15%] w-[420px] h-[420px] rounded-full bg-emerald-700/10 blur-[120px] animate-pulse-blob pointer-events-none" />
+  const flagged = items.filter((i) => fileStatus(i) !== 'verified').length;
 
-      <div className="relative max-w-2xl mx-auto px-6 py-16">
-        {/* Header */}
-        <div className="text-center mb-10 animate-fade-in-up">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-medium mb-5">
-            <CheckCircle className="w-4 h-4" />
-            Redaction Complete
+  return (
+    <div className="relative min-h-[calc(100vh-var(--nav-h))] overflow-hidden bg-[#06060f]">
+      <div className="dot-grid pointer-events-none absolute inset-0 opacity-50" />
+      <div className="relative mx-auto max-w-3xl px-4 py-12 sm:px-6">
+        <div className="mb-8 text-center animate-fade-in-up">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-300">
+            <CircleCheck className="h-4 w-4" aria-hidden="true" />
+            Redaction complete
           </div>
-          <h1 className="text-4xl font-black tracking-tight text-white mb-3">
-            Your redacted <span className="shimmer-text">documents</span> are ready
+          <h1 className="mb-3 text-3xl font-black tracking-tight text-white sm:text-4xl">
+            {items.length} redacted file{items.length === 1 ? '' : 's'} ready
           </h1>
-          <p className="text-gray-400 text-[15px] leading-relaxed max-w-md mx-auto">
-            {items.length} file{items.length === 1 ? '' : 's'} redacted permanently. All processing stayed on your
-            device.
+          <p className="mx-auto max-w-md text-[15px] leading-relaxed text-gray-400">
+            Processed on this device. Open each file and check it before you share it.
           </p>
         </div>
 
-        {/* Card */}
-        <div
-          className="relative rounded-2xl border border-white/[0.08] bg-[#0d0d1f]/80 backdrop-blur-xl shadow-2xl animate-fade-in-up anim-delay-200 overflow-hidden"
-          style={{ boxShadow: '0 0 60px rgba(16,185,129,0.06), 0 25px 50px rgba(0,0,0,0.5)' }}
-        >
-          <div className="px-8 pt-7 pb-6 border-b border-white/[0.06]">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-                <Download className="w-5 h-5 text-emerald-400" />
-              </div>
-              <div>
-                <h2 className="text-[15px] font-bold text-white">Redacted files</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Download individual files or grab them all</p>
-              </div>
-            </div>
+        {flagged > 0 && (
+          <div
+            className="mb-5 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-[13px] text-amber-100/90"
+            role="alert"
+          >
+            <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden="true" />
+            <p>
+              {flagged} file{flagged === 1 ? ' needs' : 's need'} your review. Read the notes below
+              before sharing.
+            </p>
           </div>
+        )}
 
-          {/* File list */}
-          <div className="p-6 space-y-3 max-h-[46vh] overflow-y-auto scrollbar-thin">
-            {items.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 py-10 text-gray-500">
-                <FileText className="w-6 h-6 text-gray-600" />
-                <p className="text-sm">No files were confirmed for download.</p>
-              </div>
-            ) : (
-              items.map((item) => (
-                <div
-                  key={item.fileId}
-                  className="flex items-center gap-3 p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-colors group"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0">
-                    <FileText className="w-5 h-5 text-violet-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-medium text-white truncate">{item.name}</p>
-                    <p className="text-[11px] text-gray-600 truncate">{redactedFileName(item.name)}</p>
-                  </div>
-                  <a
-                    href={item.url}
-                    download={redactedFileName(item.name)}
-                    className="shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[12.5px] font-semibold text-violet-300 border border-violet-500/25 bg-violet-500/10 hover:bg-violet-500/20 hover:text-white transition-all"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download
-                  </a>
-                </div>
-              ))
+        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d0d1f]/80 shadow-2xl backdrop-blur-xl">
+          <ul className="max-h-[56vh] divide-y divide-white/[0.05] overflow-y-auto">
+            {items.length === 0 && (
+              <li className="flex flex-col items-center gap-3 py-12 text-gray-500">
+                <FileText className="h-6 w-6" aria-hidden="true" />
+                <p className="text-sm">No files were redacted.</p>
+              </li>
             )}
-          </div>
+            {items.map((item) => {
+              const status = fileStatus(item);
+              return (
+                <li key={item.fileId} className="p-5">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/10">
+                      <FileText className="h-5 w-5 text-violet-400" aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium text-white">
+                        {redactedFileName(item.name)}
+                      </p>
+                      <p className="truncate text-[11.5px] text-gray-500">{summary(item.report)}</p>
+                    </div>
+                    <StatusBadge status={status} />
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12.5px] font-medium text-gray-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                      Preview
+                    </a>
+                    <a
+                      href={item.url}
+                      download={redactedFileName(item.name)}
+                      className="flex items-center gap-1.5 rounded-lg border border-violet-500/25 bg-violet-500/10 px-3.5 py-2 text-[12.5px] font-semibold text-violet-300 transition-colors hover:bg-violet-500/20 hover:text-white"
+                    >
+                      <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                      Download
+                    </a>
+                  </div>
+                  <Notes item={item} />
+                </li>
+              );
+            })}
+          </ul>
 
-          {skippedCount > 0 && (
-            <div className="px-6 pb-2">
-              <p className="text-[11.5px] text-gray-600">
-                {skippedCount} file{skippedCount === 1 ? ' was' : 's were'} skipped — no redactions were added.
-              </p>
-            </div>
+          {skipped.length > 0 && (
+            <p className="border-t border-white/[0.05] px-6 py-3 text-[11.5px] text-gray-500">
+              Not included (skipped or no boxes): {skipped.join(', ')}
+            </p>
           )}
 
-          {/* Footer */}
-          <div className="px-8 py-5 border-t border-white/[0.06] flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] px-6 py-5">
             <button
-              onClick={onBackToUpload}
-              className="flex items-center gap-1.5 text-[13px] font-medium text-gray-400 hover:text-white hover:bg-white/[0.06] px-3 py-2 rounded-xl transition-all"
+              type="button"
+              onClick={onStartOver}
+              className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-medium text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-white"
             >
-              <ArrowLeft className="w-4 h-4" />
-              Back to Upload
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Start over
             </button>
-
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
                 onClick={onEditRedactions}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-semibold text-gray-300 border border-white/[0.08] hover:bg-white/[0.05] hover:text-white transition-all"
+                className="flex items-center gap-2 rounded-xl border border-white/[0.08] px-4 py-2.5 text-[13px] font-semibold text-gray-300 transition-colors hover:bg-white/[0.05] hover:text-white"
               >
-                <ShieldCheck className="w-4 h-4" />
-                Edit Redactions
+                <PencilLine className="h-4 w-4" aria-hidden="true" />
+                Edit boxes
               </button>
-              <button
-                disabled={items.length === 0}
-                onClick={downloadAll}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all ${
-                  items.length === 0
-                    ? 'bg-white/[0.04] text-gray-600 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.02]'
-                }`}
-              >
-                Download All
-                <ArrowRight className="w-4 h-4" />
-              </button>
+              {items.length > 1 && (
+                <button
+                  type="button"
+                  disabled={zipping}
+                  onClick={downloadZip}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2.5 text-[13px] font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:from-emerald-500 hover:to-teal-500 disabled:opacity-60"
+                >
+                  <FileArchive className="h-4 w-4" aria-hidden="true" />
+                  {zipping ? 'Preparing…' : 'Download all (.zip)'}
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function StatusBadge({ status }: { status: FileStatus }) {
+  if (status === 'verified') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
+        <CircleCheck className="h-3 w-3" aria-hidden="true" />
+        Verified
+      </span>
+    );
+  }
+  if (status === 'failed') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[11px] font-semibold text-red-300">
+        <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+        Text found
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-300">
+      <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+      Review
+    </span>
+  );
+}
+
+function Notes({ item }: { item: DownloadItem }) {
+  const notes: { tone: 'warning' | 'info' | 'error'; text: string }[] = [];
+  const v = item.verification;
+  if (v && v.charactersUnderBoxes > 0) {
+    notes.push({
+      tone: 'error',
+      text: `Verification found ${v.charactersUnderBoxes} extractable character${v.charactersUnderBoxes === 1 ? '' : 's'} still under boxes on page ${v.pages.join(', ')}. Do not share this file; edit the boxes or report the PDF as a bug.`,
+    });
+  } else if (!v) {
+    notes.push({
+      tone: 'info',
+      text: 'Automatic verification could not run for this file. Check it manually.',
+    });
+  }
+  for (const w of item.report.warnings) {
+    notes.push({ tone: w.severity, text: `${w.page ? `Page ${w.page}: ` : ''}${w.message}` });
+  }
+  if (item.report.documentItemsRemoved.length > 0) {
+    notes.push({
+      tone: 'info',
+      text: `Also removed: ${item.report.documentItemsRemoved.join(', ')}.`,
+    });
+  }
+  if (notes.length === 0) return null;
+  const tone = {
+    error: 'text-red-300',
+    warning: 'text-amber-200/90',
+    info: 'text-gray-400',
+  } as const;
+  return (
+    <ul className="mt-3 space-y-1.5 pl-[3.25rem]">
+      {notes.map((n, i) => (
+        <li
+          key={i}
+          className={`flex items-start gap-2 text-[12px] leading-relaxed ${tone[n.tone]}`}
+        >
+          {n.tone === 'info' ? (
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          ) : (
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          )}
+          <span>{n.text}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

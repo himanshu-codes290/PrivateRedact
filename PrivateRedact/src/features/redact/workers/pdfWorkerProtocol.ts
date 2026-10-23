@@ -1,40 +1,42 @@
-import type { PdfRect } from '@/features/redact/lib/coordinates';
+import type { PageRedactions, RedactReport, RedactionErrorCode } from '@/features/redact/engine';
 
 /**
- * Typed postMessage protocol between the main-thread client
- * (`pdfWorker.ts`) and the flatten worker (`pdfProcessor.worker.ts`).
- * `fileId` echoes the request so the client can route one-at-a-time jobs.
+ * Typed postMessage protocol between the main-thread client (`pdfWorker.ts`)
+ * and the redaction worker (`pdfProcessor.worker.ts`).
+ *
+ * Every request carries a unique `jobId` that the worker echoes back, so
+ * responses can never be routed to the wrong caller.
  */
 
 export interface RedactRequest {
   type: 'redact';
-  fileId: string;
-  /** Original PDF bytes — transferred to the worker (zero-copy). */
+  jobId: number;
+  /** Original PDF bytes, transferred (zero-copy) to the worker. */
   buffer: ArrayBuffer;
-  /** `pageRedactions[i]` = rects for page i (index 0 = page 1). */
-  pageRedactions: (PdfRect[] | undefined)[];
+  pageRedactions: PageRedactions;
 }
 
 export interface ProgressMessage {
   type: 'progress';
-  fileId: string;
-  /** 0..1 across all pages. */
+  jobId: number;
+  /** 0..1 */
   progress: number;
 }
 
 export interface RedactResultMessage {
   type: 'redact-result';
-  fileId: string;
-  /** Redacted PDF bytes — exact-length buffer, transferred back. */
+  jobId: number;
+  /** Redacted PDF bytes, transferred back (zero-copy). */
   bytes: ArrayBuffer;
-  strippedRunCount: number;
-  burnedRectCount: number;
+  report: RedactReport;
 }
 
 export interface RedactErrorMessage {
   type: 'redact-error';
-  fileId: string;
+  jobId: number;
   message: string;
+  code?: RedactionErrorCode;
+  stack?: string;
 }
 
 export type WorkerRequest = RedactRequest;

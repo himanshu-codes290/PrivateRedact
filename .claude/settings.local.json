@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npx tsc *)",
-      "Bash(awk '/\\\\.textLayer/{flag=1} flag{print} /^\\\\}/{if\\(flag\\)c++; if\\(c>=1 && /^\\\\}/ && flag\\){}} flag&&/^\\\\}/{n++; if\\(n>18\\)exit}' node_modules/pdfjs-dist/web/pdf_viewer.css)"
-    ]
-  }
-}

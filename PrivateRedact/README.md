@@ -1,75 +1,71 @@
-# React + TypeScript + Vite
+# PrivateRedact web app
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Developer notes for the client-side PDF redaction app. For what the project is and how it works,
+see the [documentation](../docs/README.md).
 
-Currently, two official plugins are available:
+## Requirements
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Node.js 22.22+ (`../.nvmrc`)
+- npm 10+
 
-## React Compiler
+## Scripts
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Command                           | What it does                                                                 |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| `npm run dev`                     | Vite dev server with hot reload (no CSP in dev).                             |
+| `npm run build`                   | Typecheck, then production build into `dist/` (CSP injected, PWA generated). |
+| `npm run preview`                 | Serve `dist/` locally to test the production build.                          |
+| `npm test`                        | Run all tests once (Vitest).                                                 |
+| `npm run test:watch`              | Tests in watch mode.                                                         |
+| `npm run test:coverage`           | Tests with a V8 coverage report in `coverage/`.                              |
+| `npm run test:e2e`                | Playwright end-to-end tests in Chromium against the dev server.              |
+| `npm run test:e2e:ui`             | Same, in the Playwright UI runner.                                           |
+| `npm run lint`                    | ESLint with type-aware rules; fails on any warning.                          |
+| `npm run typecheck`               | `tsc -b` in strict mode.                                                     |
+| `npm run format` / `format:check` | Prettier write / verify.                                                     |
+| `npm run analyze`                 | Production build plus `stats.html` bundle treemap.                           |
+| `npm run check`                   | Everything CI runs, in order.                                                |
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Source layout
 
 ```
-
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+src/
+  main.tsx, Routes.tsx        app entry, lazy routes, error boundary
+  config.ts                   repo/docs URLs (no secrets: there is no backend)
+  components/                 Layout, ErrorBoundary
+  hooks/                      useLatest, useFocusTrap
+  pages/                      Home, Redact, Privacy, NotFound
+  features/redact/
+    engine/                   pdf-lib redaction engine (no DOM, runs in worker + Node)
+      tokenizer.ts            content-stream lexer with byte ranges
+      fonts.ts                glyph widths, code splitting, ascent/descent
+      interpreter.ts          graphics/text state machine, glyph-level rewrite, XObjects, images
+      page.ts                 per-page pipeline, burn boxes, annotation removal
+      sanitize.ts             metadata scrub + garbage collection of unreachable objects
+      redactPdf.ts            public entry point
+      __tests__/              fixture builders, leak scanner, regression tests
+    state/redactionsReducer.ts  boxes per file/page with undo/redo history
+    workers/                  worker entry, typed protocol, main-thread client
+    lib/                      PDF.js loader, coordinates, intake validation, verification, zip
+    hooks/                    usePdfDocument, useWorkspaceShortcuts
+    components/               workspace UI (viewer, Fabric overlay, toolbar, dialogs)
+build-plugins/                CSP meta injection, same-origin PDF.js assets
 ```
+
+## Environment variables
+
+| Variable         | Used at | Purpose                                                                           |
+| ---------------- | ------- | --------------------------------------------------------------------------------- |
+| `VITE_BASE_PATH` | build   | Serve from a sub-path, e.g. `/PrivateRedact/` on GitHub Pages. Must end with `/`. |
+| `ANALYZE=1`      | build   | Emit `stats.html` (bundle visualiser).                                            |
+
+## Notes
+
+- Engine tests run in Node; component tests run in happy-dom (`// @vitest-environment happy-dom`).
+- End-to-end tests live in `e2e/` and build their PDF fixtures with pdf-lib at run time. They
+  start the Vite dev server themselves; set `E2E_PREVIEW=1` to build and test the production
+  bundle instead. First run: `npx playwright install chromium`.
+- PDF.js runtime assets (CMaps, fonts, WASM decoders) are served from `/pdfjs/` by
+  `build-plugins/pdfjsAssets.ts`, so no CDN is needed.
+- `eslint-plugin-jsx-a11y` is not yet compatible with ESLint 10, so accessibility is covered by
+  Testing Library role queries in component tests instead.

@@ -1,88 +1,118 @@
 import type { ReactNode } from 'react';
-import { Link, useLocation } from 'react-router';
-import { ShieldIcon } from '@/utils/icons';
+import { Link, NavLink, useLocation } from 'react-router';
+import { Shield } from 'lucide-react';
+import { APP_NAME, REPO_URL } from '@/config';
 
 interface LayoutProps {
   children: ReactNode;
 }
 
-const NAV_LINKS = ['Features', 'How it Works', 'Pricing', 'Docs'];
+const SECTION_LINKS = [
+  { label: 'Features', hash: 'features' },
+  { label: 'How it works', hash: 'how-it-works' },
+  { label: 'Limits', hash: 'what-is-removed' },
+];
 
 export function Layout({ children }: LayoutProps) {
-  const location = useLocation();
-  const isHome = location.pathname === '/';
+  const { pathname } = useLocation();
+  const isHome = pathname === '/';
+  // The workspace is a full-height app view: no marketing footer under it.
+  const isApp = pathname.startsWith('/redact');
 
   return (
-    <div className="min-h-screen bg-[#06060f] text-white overflow-x-hidden flex flex-col">
+    <div className="flex min-h-screen flex-col overflow-x-hidden bg-[#06060f] text-white">
+      <a
+        href="#main"
+        className="sr-only z-[60] rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
+      >
+        Skip to content
+      </a>
 
-      {/* ── Navbar ──────────────────────────────────────────── */}
-      <nav className="fixed top-0 inset-x-0 z-50 flex items-center justify-between px-6 py-4 glass border-b border-white/[0.06]">
-        <Link to="/" id="nav-logo" className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-purple-800 flex items-center justify-center shadow-lg shadow-violet-500/30 group-hover:shadow-violet-500/50 transition-shadow">
-            <ShieldIcon className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-bold text-[15px] tracking-tight">PrivateRedact</span>
-        </Link>
+      <header className="glass fixed inset-x-0 top-0 z-50 border-b border-white/[0.06]">
+        <nav
+          className="flex h-[var(--nav-h)] items-center justify-between px-4 sm:px-6"
+          aria-label="Main"
+        >
+          <Link to="/" className="group flex items-center gap-2.5" aria-label={`${APP_NAME} home`}>
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-purple-800 shadow-lg shadow-violet-500/30">
+              <Shield className="h-4 w-4 text-white" aria-hidden="true" />
+            </span>
+            <span className="text-[15px] font-bold tracking-tight">{APP_NAME}</span>
+          </Link>
 
-        <div className="hidden md:flex items-center gap-7 text-sm text-gray-400">
-          {isHome
-            ? NAV_LINKS.map(link => (
-                <a
-                  key={link}
-                  href={`#${link.toLowerCase().replace(/\s/g, '-')}`}
-                  className="hover:text-white transition-colors duration-200"
-                >
-                  {link}
+          <div className="hidden items-center gap-7 text-sm text-gray-400 md:flex">
+            {SECTION_LINKS.map((l) =>
+              isHome ? (
+                <a key={l.hash} href={`#${l.hash}`} className="transition-colors hover:text-white">
+                  {l.label}
                 </a>
-              ))
-            : NAV_LINKS.map(link => (
+              ) : (
                 <Link
-                  key={link}
-                  to={`/#${link.toLowerCase().replace(/\s/g, '-')}`}
-                  className="hover:text-white transition-colors duration-200"
+                  key={l.hash}
+                  to={`/#${l.hash}`}
+                  className="transition-colors hover:text-white"
                 >
-                  {link}
+                  {l.label}
                 </Link>
-              ))}
-        </div>
+              ),
+            )}
+            <NavLink
+              to="/privacy"
+              className={({ isActive }) =>
+                `transition-colors hover:text-white ${isActive ? 'text-white' : ''}`
+              }
+            >
+              Privacy
+            </NavLink>
+          </div>
 
-        <div className="flex items-center gap-3">
-          <button className="hidden sm:block text-sm text-gray-400 hover:text-white transition-colors px-3 py-2">
-            Log in
-          </button>
           <Link
             to="/redact"
-            id="nav-get-started"
-            className="text-sm bg-violet-600 hover:bg-violet-500 transition-colors px-4 py-2 rounded-lg font-semibold shadow-lg shadow-violet-500/20"
+            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold shadow-lg shadow-violet-500/20 transition-colors hover:bg-violet-500"
           >
-            Get Started Free
+            {isApp ? 'Workspace' : 'Open app'}
           </Link>
-        </div>
-      </nav>
+        </nav>
+      </header>
 
-      {/* ── Page content ─────────────────────────────────────── */}
-      <main className="flex-1 pt-[65px]">
+      <main id="main" className="flex-1 pt-[var(--nav-h)]" tabIndex={-1}>
         {children}
       </main>
 
-      {/* ── Footer ──────────────────────────────────────────── */}
-      <footer className="border-t border-white/[0.05] py-8">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-[13px] text-gray-600">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-600 to-purple-800 flex items-center justify-center">
-              <ShieldIcon className="w-3.5 h-3.5 text-white" />
+      {!isApp && (
+        <footer className="border-t border-white/[0.05] py-8">
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 text-[13px] text-gray-500 md:flex-row">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-violet-600 to-purple-800">
+                <Shield className="h-3.5 w-3.5 text-white" aria-hidden="true" />
+              </span>
+              <span className="font-semibold text-gray-400">{APP_NAME}</span>
             </div>
-            <span className="text-gray-400 font-semibold">PrivateRedact</span>
+            <p>Open source under the MIT licence. Your files never leave your device.</p>
+            <nav className="flex gap-6" aria-label="Footer">
+              <Link to="/privacy" className="transition-colors hover:text-gray-300">
+                Privacy
+              </Link>
+              <a
+                href={REPO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-colors hover:text-gray-300"
+              >
+                Source
+              </a>
+              <a
+                href={`${REPO_URL}/blob/main/LICENSE`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-colors hover:text-gray-300"
+              >
+                Licence
+              </a>
+            </nav>
           </div>
-          <p>© 2026 PrivateRedact. All rights reserved.</p>
-          <div className="flex gap-6">
-            {['Privacy', 'Terms', 'Contact'].map(l => (
-              <a key={l} href="#" className="hover:text-gray-400 transition-colors">{l}</a>
-            ))}
-          </div>
-        </div>
-      </footer>
-
+        </footer>
+      )}
     </div>
   );
 }

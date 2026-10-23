@@ -1,270 +1,241 @@
-import { useState, useCallback } from "react";
-import { useDropzone } from "react-dropzone";
+import { useState } from 'react';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 import {
-  Upload,
-  FileText,
-  X,
-  CheckCircle,
   AlertCircle,
   ArrowRight,
+  CircleCheck,
+  FileText,
+  Loader2,
+  Lock,
   ShieldCheck,
   Trash2,
-  Lock,
-} from "lucide-react";
+  Upload,
+  WifiOff,
+  X,
+} from 'lucide-react';
+import {
+  MAX_FILE_BYTES,
+  MAX_FILES,
+  formatBytes,
+  intakeFiles,
+  type QueuedFile,
+} from '@/features/redact/lib/fileIntake';
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB Limit
-
-export interface UploadedFileItem {
-  id: string;
-  file: File;
-  name: string;
-  size: string;
-  progress: number;
-  status: "ready" | "uploading" | "error";
+interface UploadDocumentProps {
+  /** Files already queued (when returning from the workspace). */
+  initialFiles?: readonly QueuedFile[];
+  onProceed: (files: QueuedFile[]) => void;
 }
 
-interface DocumentUploadProps {
-  onProceedToRedact?: (files: UploadedFileItem[]) => void;
+function rejectionMessage(r: FileRejection): string {
+  const code = r.errors[0]?.code;
+  if (code === 'file-too-large')
+    return `${r.file.name} is larger than ${formatBytes(MAX_FILE_BYTES)}.`;
+  if (code === 'file-invalid-type') return `${r.file.name} is not a PDF.`;
+  if (code === 'too-many-files') return `Only ${MAX_FILES} files can be queued at once.`;
+  return `${r.file.name} could not be added.`;
 }
 
-export default function DocumentUpload({ onProceedToRedact }: DocumentUploadProps) {
-  const [files, setFiles] = useState<UploadedFileItem[]>([]);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+/** Step 1: choose the PDFs to redact. Nothing is uploaded anywhere. */
+export default function UploadDocument({ initialFiles = [], onProceed }: UploadDocumentProps) {
+  const [files, setFiles] = useState<QueuedFile[]>([...initialFiles]);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [checking, setChecking] = useState(false);
 
-  const onDrop = useCallback((acceptedFiles: File[], fileRejections: any[]) => {
-    setErrorMessage(null);
-
-    if (fileRejections.length > 0) {
-      const isOversized = fileRejections.some((r) => r.file.size > MAX_FILE_SIZE);
-      if (isOversized) {
-        setErrorMessage("One or more files exceed the maximum limit of 25MB.");
-      } else {
-        setErrorMessage("Invalid file type. Please upload valid PDF documents.");
-      }
+  const onDrop = async (accepted: File[], rejections: FileRejection[]) => {
+    setChecking(true);
+    try {
+      const result = await intakeFiles(accepted, files);
+      setFiles((prev) => [...prev, ...result.accepted]);
+      setErrors([...rejections.map(rejectionMessage), ...result.errors]);
+    } finally {
+      setChecking(false);
     }
-
-    const newFiles: UploadedFileItem[] = acceptedFiles.map((file) => ({
-      id: `${file.name}-${Date.now()}-${Math.random()}`,
-      file,
-      name: file.name,
-      size: (file.size / (1024 * 1024)).toFixed(2),
-      progress: 100,
-      status: "ready",
-    }));
-
-    setFiles((prev) => [...prev, ...newFiles]);
-  }, []);
+  };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: { "application/pdf": [".pdf"] },
-    maxSize: MAX_FILE_SIZE,
+    onDrop: (a, r) => void onDrop(a, r),
+    accept: { 'application/pdf': ['.pdf'] },
+    maxSize: MAX_FILE_BYTES,
     multiple: true,
   });
 
-  const removeFile = (id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id));
-  };
-
-  const handleProceed = () => {
-    if (files.length === 0) return;
-    if (onProceedToRedact) {
-      onProceedToRedact(files);
-    }
-  };
+  const encryptedCount = files.filter((f) => f.encrypted).length;
 
   return (
-    <div className="min-h-[calc(100vh-65px)] bg-[#06060f] relative overflow-hidden">
+    <div className="relative min-h-[calc(100vh-var(--nav-h))] overflow-hidden bg-[#06060f]">
+      <div className="dot-grid pointer-events-none absolute inset-0 opacity-50" />
+      <div className="pointer-events-none absolute left-[10%] top-1/4 h-[500px] w-[500px] rounded-full bg-violet-700/15 blur-[120px] animate-pulse-blob" />
 
-      {/* Background blobs */}
-      <div className="absolute inset-0 dot-grid pointer-events-none opacity-50" />
-      <div className="absolute top-1/4 left-[10%] w-[500px] h-[500px] rounded-full bg-violet-700/15 blur-[120px] animate-pulse-blob pointer-events-none" />
-      <div className="absolute bottom-1/4 right-[5%] w-[400px] h-[400px] rounded-full bg-purple-700/10 blur-[100px] animate-pulse-blob anim-delay-2000 pointer-events-none" />
-
-      <div className="relative max-w-3xl mx-auto px-6 py-16">
-
-        {/* Page header */}
-        <div className="text-center mb-10 animate-fade-in-up">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 text-sm font-medium mb-5">
-            <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse inline-block" />
-            Secure Document Redaction
+      <div className="relative mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
+        <div className="mb-10 text-center animate-fade-in-up">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/10 px-4 py-1.5 text-sm font-medium text-violet-300">
+            <WifiOff className="h-3.5 w-3.5" aria-hidden="true" />
+            Runs entirely in your browser
           </div>
-          <h1 className="text-4xl font-black tracking-tight text-white mb-3">
-            Upload Your <span className="shimmer-text">Documents</span>
+          <h1 className="mb-3 text-3xl font-black tracking-tight text-white sm:text-4xl">
+            Choose your <span className="shimmer-text">documents</span>
           </h1>
-          <p className="text-gray-400 text-[15px] leading-relaxed max-w-md mx-auto">
-            Select single or batch PDFs. All processing happens locally — your files never leave your device.
+          <p className="mx-auto max-w-md text-[15px] leading-relaxed text-gray-400">
+            Add one PDF or a batch. Files are opened locally and are never sent to a server.
           </p>
         </div>
 
-        {/* Main card */}
-        <div
-          className="relative rounded-2xl border border-white/[0.08] bg-[#0d0d1f]/80 backdrop-blur-xl shadow-2xl animate-fade-in-up anim-delay-200"
-          style={{ boxShadow: "0 0 60px rgba(124,58,237,0.08), 0 25px 50px rgba(0,0,0,0.5)" }}
+        <section
+          className="relative rounded-2xl border border-white/[0.08] bg-[#0d0d1f]/80 shadow-2xl backdrop-blur-xl animate-fade-in-up anim-delay-200"
+          aria-labelledby="upload-title"
         >
-          {/* Card header */}
-          <div className="px-8 pt-8 pb-6 border-b border-white/[0.06]">
+          <div className="border-b border-white/[0.06] px-6 pb-6 pt-7 sm:px-8">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center">
-                <Upload className="w-5 h-5 text-violet-400" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/15">
+                <Upload className="h-5 w-5 text-violet-400" aria-hidden="true" />
               </div>
               <div>
-                <h2 className="text-[15px] font-bold text-white">Upload PDF Documents</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Supports batch upload · Up to 25 MB per file</p>
+                <h2 id="upload-title" className="text-[15px] font-bold text-white">
+                  PDF documents
+                </h2>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Up to {MAX_FILES} files · {formatBytes(MAX_FILE_BYTES)} each
+                </p>
               </div>
             </div>
           </div>
 
-          <div className="p-8 space-y-6">
-
-            {/* Dropzone */}
+          <div className="space-y-6 p-6 sm:p-8">
             <div
               {...getRootProps()}
-              className={`relative border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-300 group ${
+              className={`relative cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-500 ${
                 isDragActive
-                  ? "border-violet-500/70 bg-violet-500/5 scale-[1.01]"
-                  : "border-white/[0.1] hover:border-violet-500/40 hover:bg-violet-500/[0.03] bg-white/[0.01]"
+                  ? 'scale-[1.01] border-violet-500/70 bg-violet-500/5'
+                  : 'border-white/[0.1] bg-white/[0.01] hover:border-violet-500/40 hover:bg-violet-500/[0.03]'
               }`}
             >
-              <input {...getInputProps()} />
-
-              {/* Glow on drag */}
-              {isDragActive && (
-                <div className="absolute inset-0 rounded-xl bg-violet-500/5 animate-pulse pointer-events-none" />
-              )}
-
+              <input {...getInputProps()} aria-label="Choose PDF files" />
               <div className="flex flex-col items-center justify-center space-y-4">
-                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-300 ${
-                  isDragActive
-                    ? "bg-violet-500/20 text-violet-400 scale-110"
-                    : "bg-white/[0.04] text-gray-500 group-hover:bg-violet-500/10 group-hover:text-violet-400"
-                }`}>
-                  <Upload className="w-7 h-7" />
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.04] text-gray-400">
+                  {checking ? (
+                    <Loader2 className="h-7 w-7 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Upload className="h-7 w-7" aria-hidden="true" />
+                  )}
                 </div>
-                <div className="space-y-1.5">
-                  <p className="text-[15px] font-semibold text-white">
-                    {isDragActive ? "Drop your PDFs here…" : "Drag & drop PDF files, or click to browse"}
-                  </p>
-                  <p className="text-xs text-gray-600">
-                    Batch upload supported · Max 25 MB per document
-                  </p>
-                </div>
-                {!isDragActive && (
-                  <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs font-medium">
-                    Browse Files
-                  </div>
-                )}
+                <p className="text-[15px] font-semibold text-white">
+                  {isDragActive ? 'Drop your PDFs here…' : 'Drag & drop PDFs, or click to browse'}
+                </p>
+                <p className="text-xs text-gray-500">
+                  Each file is checked to be a real PDF before it is added.
+                </p>
               </div>
             </div>
 
-            {/* Error alert */}
-            {errorMessage && (
-              <div className="flex items-start gap-3 p-4 rounded-xl border border-red-500/25 bg-red-500/5">
-                <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-semibold text-red-400">Upload Error</p>
-                  <p className="text-xs text-red-400/70 mt-0.5">{errorMessage}</p>
-                </div>
+            {errors.length > 0 && (
+              <div
+                className="flex items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/5 p-4"
+                role="alert"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" aria-hidden="true" />
+                <ul className="flex-1 space-y-0.5 text-xs text-red-300/90">
+                  {errors.map((e) => (
+                    <li key={e}>{e}</li>
+                  ))}
+                </ul>
                 <button
-                  onClick={() => setErrorMessage(null)}
-                  className="ml-auto text-red-400/50 hover:text-red-400 transition-colors"
+                  type="button"
+                  aria-label="Dismiss errors"
+                  onClick={() => setErrors([])}
+                  className="text-red-400/60 transition-colors hover:text-red-300"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
             )}
 
-            {/* File queue */}
             {files.length > 0 && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                    Queued Documents
-                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-violet-500/20 text-violet-300 text-[10px] font-bold">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+                    Queue
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-500/20 px-1.5 text-[10px] font-bold text-violet-300">
                       {files.length}
                     </span>
                   </h3>
                   <button
+                    type="button"
                     onClick={() => setFiles([])}
-                    className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-red-400 transition-colors"
+                    className="flex items-center gap-1.5 text-xs text-gray-500 transition-colors hover:text-red-400"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Clear All
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    Clear all
                   </button>
                 </div>
 
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+                <ul className="max-h-56 space-y-2 overflow-y-auto pr-1">
                   {files.map((item) => (
-                    <div
+                    <li
                       key={item.id}
-                      className="flex items-center justify-between p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-colors group/item"
+                      className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5"
                     >
                       <div className="flex items-center gap-3 overflow-hidden">
-                        <div className="w-9 h-9 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0">
-                          <FileText className="w-4 h-4 text-violet-400" />
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10">
+                          <FileText className="h-4 w-4 text-violet-400" aria-hidden="true" />
                         </div>
                         <div className="truncate">
-                          <p className="text-sm font-medium text-white truncate">{item.name}</p>
-                          <p className="text-[11px] text-gray-600">{item.size} MB</p>
+                          <p className="truncate text-sm font-medium text-white">{item.name}</p>
+                          <p className="text-[11px] text-gray-500">{formatBytes(item.size)}</p>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-500/25 bg-emerald-500/8 text-emerald-400 text-[10px] font-semibold">
-                          <CheckCircle className="w-3 h-3" />
-                          Ready
-                        </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {item.encrypted ? (
+                          <span className="flex items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold text-amber-300">
+                            <Lock className="h-3 w-3" aria-hidden="true" />
+                            Encrypted
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">
+                            <CircleCheck className="h-3 w-3" aria-hidden="true" />
+                            Ready
+                          </span>
+                        )}
                         <button
-                          onClick={() => removeFile(item.id)}
-                          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-700 hover:text-white hover:bg-white/10 transition-all opacity-0 group-hover/item:opacity-100"
+                          type="button"
+                          onClick={() => setFiles((prev) => prev.filter((f) => f.id !== item.id))}
+                          aria-label={`Remove ${item.name}`}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-white/10 hover:text-white"
                         >
-                          <X className="w-3.5 h-3.5" />
+                          <X className="h-3.5 w-3.5" aria-hidden="true" />
                         </button>
                       </div>
-                    </div>
+                    </li>
                   ))}
-                </div>
+                </ul>
+                {encryptedCount > 0 && (
+                  <p className="text-[11.5px] text-amber-300/80">
+                    Encrypted PDFs can be viewed but not redacted. Remove their protection first.
+                  </p>
+                )}
               </div>
             )}
           </div>
 
-          {/* Card footer */}
-          <div className="px-8 py-5 border-t border-white/[0.06] flex items-center justify-between gap-4">
-            <div className="flex items-center gap-1.5 text-[11px] text-gray-600">
-              <Lock className="w-3.5 h-3.5 text-emerald-500/70" />
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-              <span>100% offline · AES-256 encrypted</span>
-            </div>
-
+          <div className="flex flex-col-reverse items-stretch justify-between gap-4 border-t border-white/[0.06] px-6 py-5 sm:flex-row sm:items-center sm:px-8">
+            <p className="flex items-center gap-1.5 text-[11px] text-gray-500">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+              No upload · no account · works offline
+            </p>
             <button
-              disabled={files.length === 0}
-              onClick={handleProceed}
-              className={`group flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
-                files.length === 0
-                  ? "bg-white/[0.04] text-gray-600 cursor-not-allowed"
-                  : "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.02]"
-              }`}
+              type="button"
+              disabled={files.length === 0 || checking}
+              onClick={() => onProceed(files)}
+              className="group flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:from-violet-500 hover:to-purple-500 disabled:cursor-not-allowed disabled:from-white/[0.04] disabled:to-white/[0.04] disabled:text-gray-600 disabled:shadow-none"
             >
-              Open Redaction Workspace
-              <ArrowRight className={`w-4 h-4 transition-transform duration-200 ${files.length > 0 ? "group-hover:translate-x-1" : ""}`} />
+              Open workspace
+              <ArrowRight
+                className="h-4 w-4 transition-transform group-enabled:group-hover:translate-x-1"
+                aria-hidden="true"
+              />
             </button>
           </div>
-        </div>
-
-        {/* Trust pills below card */}
-        <div className="flex flex-wrap items-center justify-center gap-6 mt-8 text-xs text-gray-600 animate-fade-in-up anim-delay-400">
-          {[
-            { icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />, label: "No data ever leaves your device" },
-            { icon: <Lock className="w-3.5 h-3.5 text-violet-400" />, label: "HIPAA & GDPR compliant" },
-            { icon: <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />, label: "No signup required" },
-          ].map(({ icon, label }) => (
-            <span key={label} className="flex items-center gap-1.5">
-              {icon}
-              {label}
-            </span>
-          ))}
-        </div>
-
+        </section>
       </div>
     </div>
   );

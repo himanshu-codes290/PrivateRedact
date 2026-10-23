@@ -1,48 +1,52 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, type RefObject } from 'react';
 import type { PageViewport } from 'pdfjs-dist';
-import { Canvas, Rect } from 'fabric';
-import type { RedactionTool } from './RedactWorkspace';
-import type { PdfRect } from '@/features/redact/lib/coordinates';
-import { pdfRectToViewport, viewportRectToPdf } from '@/features/redact/lib/coordinates';
+import { ActiveSelection, Canvas, Rect, type FabricObject } from 'fabric';
+import {
+  pdfRectToViewport,
+  viewportRectToPdf,
+  type ViewportLike,
+} from '@/features/redact/lib/coordinates';
+import { newRedactionId, type Redaction } from '@/features/redact/state/redactionsReducer';
+import { groupSelectionRects } from '@/features/redact/lib/selection';
+import { useLatest } from '@/hooks/useLatest';
+import type { RedactionTool } from './Toolbar';
 
-/** Imperative handle the Toolbar uses for undo / clear. */
 export interface RedactOverlayHandle {
-  undo: () => void;
-  clear: () => void;
+  deleteSelection: () => void;
+  deselect: () => void;
 }
 
 interface FabricOverlayProps {
-  /** Live viewport of the page this overlay sits on (top-left origin, CSS px). */
+  /** Live viewport of the page under the overlay (CSS px, top-left origin). */
   viewport: PageViewport;
   tool: RedactionTool;
-  /** Redactions persisted in PDF user space — seeded once on mount. */
-  existingRedactions: PdfRect[];
-  /** Fired whenever the set of redactions changes (draw/finish, move, resize, delete, undo, clear). */
-  onRedactionChange: (rects: PdfRect[]) => void;
-  /**
-   * When true the overlay is inert (no pointer events) so the browser's
-   * native text selection can reach the pdf.js TextLayer underneath.
-   * Must be enabled together with PdfViewer's textSelectable.
-   */
-  textSelectable?: boolean;
+  /** Boxes for this page, in PDF user space. The overlay mirrors them. */
+  redactions: readonly Redaction[];
+  /** Freeze all interaction (e.g. while a modal dialog is open). */
+  disabled: boolean;
+  /** The PDF.js text layer, used to scope text-tool selections. */
+  textLayerRef: RefObject<HTMLDivElement | null>;
+  onAdd: (redactions: Redaction[]) => void;
+  onUpdate: (redactions: Redaction[]) => void;
+  onRemove: (ids: string[]) => void;
 }
 
-const REDACTION_FILL = 'rgba(139, 92, 246, 0.35)';
+const FILL = 'rgba(139, 92, 246, 0.35)';
 const ACCENT = '#8b5cf6';
+/** Pixel tolerance before a stored box is considered moved. */
+const SYNC_EPSILON = 0.5;
 
-/** Build a redaction Rect at the given viewport coords. */
-function makeRedactionRect(left: number, top: number, width: number, height: number) {
+function makeRect(left: number, top: number, width: number, height: number): Rect {
   return new Rect({
     left,
     top,
     width,
     height,
-    // Fabric v7 defaults originX/originY to 'center', which would treat the
-    // passed left/top as the rect's CENTER — shifting every box up-left by
-    // half its size. Pin the corner origin so left/top is the top-left corner.
+    // Fabric v7 defaults the origin to the centre; pin it to the corner so
+    // left/top are the top-left corner like everywhere else in the app.
     originX: 'left',
     originY: 'top',
-    fill: REDACTION_FILL,
+    fill: FILL,
     strokeWidth: 0,
     borderColor: ACCENT,
     cornerColor: ACCENT,
@@ -53,270 +57,268 @@ function makeRedactionRect(left: number, top: number, width: number, height: num
   });
 }
 
-interface LineRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
+/** Two-way mapping between store ids and Fabric objects. */
+interface Registry {
+  byId: Map<string, FabricObject>;
+  ids: WeakMap<FabricObject, string>;
 }
 
-/**
- * Collapse the many client rects a text Range produces (one per glyph run)
- * into one box per visual line. Coords are shifted into page-local space by
- * subtracting the page origin, so the result is already in viewport CSS px
- * (== Fabric scene coords at zoom 1). Rects on the same line are merged when
- * a rect's vertical center falls inside the current line's band.
- */
-function groupSelectionRects(rects: DOMRect[], originX: number, originY: number): LineRect[] {
-  const local = rects
-    .filter((r) => r.width > 0.5 && r.height > 0.5)
-    .map((r) => ({ left: r.left - originX, top: r.top - originY, width: r.width, height: r.height }))
-    .sort((a, b) => a.top - b.top || a.left - b.left);
+/** Bring Fabric objects in line with the store (add / move / remove). */
+function reconcile(
+  fab: Canvas,
+  registry: Registry,
+  list: readonly Redaction[],
+  viewport: ViewportLike,
+): void {
+  const wanted = new Set(list.map((r) => r.id));
+  let changed = false;
+  const markChanged = () => {
+    if (!changed) fab.discardActiveObject();
+    changed = true;
+  };
 
-  const lines: LineRect[] = [];
-  for (const r of local) {
-    const last = lines[lines.length - 1];
-    const center = r.top + r.height / 2;
-    if (last && center >= last.top && center <= last.top + last.height) {
-      const right = Math.max(last.left + last.width, r.left + r.width);
-      const bottom = Math.max(last.top + last.height, r.top + r.height);
-      last.left = Math.min(last.left, r.left);
-      last.top = Math.min(last.top, r.top);
-      last.width = right - last.left;
-      last.height = bottom - last.top;
-    } else {
-      lines.push({ ...r });
+  for (const [id, obj] of registry.byId) {
+    if (wanted.has(id)) continue;
+    markChanged();
+    fab.remove(obj);
+    registry.byId.delete(id);
+  }
+  for (const r of list) {
+    const v = pdfRectToViewport(viewport, r.rect);
+    const obj = registry.byId.get(r.id);
+    if (!obj) {
+      const rect = makeRect(v.left, v.top, v.width, v.height);
+      registry.byId.set(r.id, rect);
+      registry.ids.set(rect, r.id);
+      fab.add(rect);
+      changed = true;
+      continue;
+    }
+    obj.setCoords();
+    const b = obj.getBoundingRect();
+    if (
+      Math.abs(b.left - v.left) > SYNC_EPSILON ||
+      Math.abs(b.top - v.top) > SYNC_EPSILON ||
+      Math.abs(b.width - v.width) > SYNC_EPSILON ||
+      Math.abs(b.height - v.height) > SYNC_EPSILON
+    ) {
+      markChanged();
+      obj.set({ left: v.left, top: v.top, width: v.width, height: v.height, scaleX: 1, scaleY: 1 });
+      obj.setCoords();
     }
   }
-  return lines;
+  if (changed) fab.requestRenderAll();
+}
+
+function applyModes(fab: Canvas, tool: RedactionTool, disabled: boolean): void {
+  const drawing = tool === 'rect';
+  const inert = disabled || tool === 'text';
+  fab.skipTargetFind = drawing || inert;
+  fab.selection = !drawing && !inert;
+  fab.defaultCursor = drawing && !disabled ? 'crosshair' : 'default';
+  fab.hoverCursor = drawing ? 'crosshair' : 'move';
+  if (drawing || inert) fab.discardActiveObject();
+  fab.requestRenderAll();
 }
 
 /**
- * Fabric.js overlay canvas layered on top of the PDF render. Owns the
- * redaction rectangles: drawing (rect tool), selection / move / resize /
- * delete (select tool), undo and clear. Rectangles are reported upward
- * as PDF user-space coords (72 DPI, bottom-left origin) so pdf-lib can
- * burn them back destructively without display math.
+ * Fabric.js canvas layered over the PDF page.
+ *
+ * It is a pure VIEW of the redaction store: `reconcile()` adds, moves and
+ * removes Fabric objects to match `redactions`, and user gestures become
+ * store actions (add / update / remove). Undo, redo, zoom and page changes
+ * therefore need no special handling here.
  */
 export const FabricOverlay = forwardRef<RedactOverlayHandle, FabricOverlayProps>(
   function FabricOverlay(
-    { viewport, tool, existingRedactions, onRedactionChange, textSelectable = false },
+    { viewport, tool, redactions, disabled, textLayerRef, onAdd, onUpdate, onRemove },
     ref,
   ) {
-    const canvasElRef = useRef<HTMLCanvasElement>(null);
+    const hostRef = useRef<HTMLDivElement>(null);
     const fabricRef = useRef<Canvas | null>(null);
-    const drawingRef = useRef<{ x0: number; y0: number; rect: Rect | null } | null>(null);
+    const registryRef = useRef<Registry>({ byId: new Map(), ids: new WeakMap() });
+    const latest = useLatest({ viewport, tool, redactions, disabled, onAdd, onUpdate, onRemove });
+    const sizeKey = `${Math.floor(viewport.width)}x${Math.floor(viewport.height)}|${viewport.rotation}`;
 
-    // Refs so event handlers never capture stale props.
-    const viewportRef = useRef(viewport);
-    viewportRef.current = viewport;
-    const toolRef = useRef(tool);
-    toolRef.current = tool;
-    const onChangeRef = useRef(onRedactionChange);
-    onChangeRef.current = onRedactionChange;
-    // Latest persisted redactions — re-read whenever the overlay re-creates
-    // (file switch or viewport resize) so nothing is lost on re-mount.
-    const seedRef = useRef(existingRedactions);
-    seedRef.current = existingRedactions;
-    // Re-create the Fabric canvas whenever the displayed page size changes.
-    const sizeKey = `${Math.floor(viewport.width)}x${Math.floor(viewport.height)}`;
+    useImperativeHandle(ref, () => ({
+      deleteSelection() {
+        const fab = fabricRef.current;
+        if (!fab || latest.current.disabled) return;
+        const ids = fab
+          .getActiveObjects()
+          .map((o) => registryRef.current.ids.get(o))
+          .filter((id): id is string => Boolean(id));
+        fab.discardActiveObject();
+        if (ids.length > 0) latest.current.onRemove(ids);
+      },
+      deselect() {
+        fabricRef.current?.discardActiveObject();
+        fabricRef.current?.requestRenderAll();
+      },
+    }));
 
-    const emitChange = () => {
-      const fab = fabricRef.current;
-      if (!fab) return;
-      const rects: PdfRect[] = fab.getObjects().map((obj) => {
-        const b = obj.getBoundingRect();
-        return viewportRectToPdf(viewportRef.current, b.left, b.top, b.width, b.height);
-      });
-      onChangeRef.current(rects);
-    };
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        undo() {
-          const fab = fabricRef.current;
-          const objects = fab?.getObjects();
-          if (!fab || !objects || objects.length === 0) return;
-          fab.remove(objects[objects.length - 1]);
-          emitChange();
-        },
-        clear() {
-          const fab = fabricRef.current;
-          if (!fab) return;
-          fab.getObjects().forEach((obj) => fab.remove(obj));
-          fab.discardActiveObject();
-          fab.requestRenderAll();
-          emitChange();
-        },
-      }),
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      [],
-    );
-
+    // Create the Fabric canvas whenever the displayed page size changes. The
+    // <canvas> is created imperatively inside a host div React never
+    // reconciles, because Fabric re-parents it into its own wrapper.
     useEffect(() => {
-      const el = canvasElRef.current;
-      if (!el) return;
-      el.width = Math.floor(viewportRef.current.width);
-      el.height = Math.floor(viewportRef.current.height);
-
+      const host = hostRef.current;
+      if (!host) return;
+      const registry = registryRef.current;
+      const vp0 = latest.current.viewport;
+      const el = document.createElement('canvas');
+      el.setAttribute('aria-label', 'Redaction boxes');
+      host.appendChild(el);
       const fab = new Canvas(el, {
+        width: Math.floor(vp0.width),
+        height: Math.floor(vp0.height),
         preserveObjectStacking: true,
         selectionColor: 'rgba(139, 92, 246, 0.12)',
         selectionBorderColor: ACCENT,
-        skipTargetFind: toolRef.current === 'rect' || textSelectable,
-        selection: toolRef.current === 'select' && !textSelectable,
-        hoverCursor: toolRef.current === 'rect' ? 'crosshair' : 'default',
+        uniformScaling: false,
       });
       fabricRef.current = fab;
+      registry.byId.clear();
+      applyModes(fab, latest.current.tool, latest.current.disabled);
+      reconcile(fab, registry, latest.current.redactions, latest.current.viewport);
 
-      // Re-hydrate persisted redactions (PDF space → viewport space).
-      for (const rect of seedRef.current) {
-        const v = pdfRectToViewport(viewportRef.current, rect);
-        fab.add(makeRedactionRect(v.left, v.top, v.width, v.height));
-      }
-      fab.requestRenderAll();
+      let drawing: { x0: number; y0: number; rect: Rect | null } | null = null;
 
       fab.on('mouse:down', (opt) => {
-        if (toolRef.current !== 'rect') return;
-        drawingRef.current = { x0: opt.scenePoint.x, y0: opt.scenePoint.y, rect: null };
+        if (latest.current.tool !== 'rect' || latest.current.disabled) return;
+        drawing = { x0: opt.scenePoint.x, y0: opt.scenePoint.y, rect: null };
       });
 
       fab.on('mouse:move', (opt) => {
-        const d = drawingRef.current;
-        if (!d) return;
-        const left = Math.min(d.x0, opt.scenePoint.x);
-        const top = Math.min(d.y0, opt.scenePoint.y);
-        const width = Math.abs(opt.scenePoint.x - d.x0);
-        const height = Math.abs(opt.scenePoint.y - d.y0);
-        if (!d.rect) {
+        if (!drawing) return;
+        const left = Math.min(drawing.x0, opt.scenePoint.x);
+        const top = Math.min(drawing.y0, opt.scenePoint.y);
+        const width = Math.abs(opt.scenePoint.x - drawing.x0);
+        const height = Math.abs(opt.scenePoint.y - drawing.y0);
+        if (!drawing.rect) {
           if (width < 1 && height < 1) return;
-          const rect = makeRedactionRect(left, top, width, height);
-          rect.set({ selectable: false, evented: false, hasControls: false });
-          fab.add(rect);
-          d.rect = rect;
+          drawing.rect = makeRect(left, top, width, height);
+          drawing.rect.set({ selectable: false, evented: false });
+          fab.add(drawing.rect);
         } else {
-          d.rect.set({ left, top, width, height });
+          drawing.rect.set({ left, top, width, height });
         }
-        // set() does NOT invalidate Fabric's cached aCoords (frozen by the
-        // first render via skipOffscreen/isOnScreen) — without setCoords(),
-        // getBoundingRect() at mouse:up would report the rect's geometry
-        // from the first drag frame and the burned PDF box would be wrong.
-        d.rect.setCoords();
+        // set() does not refresh Fabric's cached corner coords; without this
+        // getBoundingRect() would report the first drag frame's geometry.
+        drawing.rect.setCoords();
         fab.requestRenderAll();
       });
 
       fab.on('mouse:up', () => {
-        const d = drawingRef.current;
-        drawingRef.current = null;
-        if (!d?.rect) return;
-        if (d.rect.width < 1 || d.rect.height < 1) {
-          fab.remove(d.rect);
+        const rect = drawing?.rect;
+        drawing = null;
+        if (!rect) return;
+        if (rect.width < 2 || rect.height < 2) {
+          fab.remove(rect);
           fab.requestRenderAll();
           return;
         }
-        // Finalize: the rect becomes a real, selectable redaction.
-        d.rect.set({ selectable: true, evented: true, hasControls: true });
-        d.rect.setCoords();
-        emitChange();
+        rect.set({ selectable: true, evented: true });
+        rect.setCoords();
+        const b = rect.getBoundingRect();
+        const id = newRedactionId();
+        registry.byId.set(id, rect);
+        registry.ids.set(rect, id);
+        latest.current.onAdd([
+          {
+            id,
+            rect: viewportRectToPdf(latest.current.viewport, b.left, b.top, b.width, b.height),
+          },
+        ]);
       });
 
-      // Persist moves / resizes made with the select tool (Fabric refreshes
-      // the coords cache itself after transforms).
-      fab.on('object:modified', () => emitChange());
-
-      const onKeyDown = (e: KeyboardEvent) => {
-        if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-        const active = document.activeElement;
-        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
-        const target = fabricRef.current?.getActiveObject();
-        if (!target) return;
-        fabricRef.current?.remove(target);
-        emitChange();
-      };
-      window.addEventListener('keydown', onKeyDown);
+      fab.on('object:modified', (opt) => {
+        const target = opt.target;
+        const objects =
+          target instanceof ActiveSelection ? target.getObjects() : target ? [target] : [];
+        const updates: Redaction[] = [];
+        for (const obj of objects) {
+          const id = registry.ids.get(obj);
+          if (!id) continue;
+          obj.setCoords();
+          const b = obj.getBoundingRect(); // absolute: includes the selection's transform
+          updates.push({
+            id,
+            rect: viewportRectToPdf(latest.current.viewport, b.left, b.top, b.width, b.height),
+          });
+        }
+        if (updates.length > 0) latest.current.onUpdate(updates);
+      });
 
       return () => {
-        window.removeEventListener('keydown', onKeyDown);
         fabricRef.current = null;
-        // StaticCanvas.dispose tears down event listeners + backing store.
-        void fab.dispose();
-        // 2D contexts are not GC-friendly — zero the backing store.
-        el.width = 0;
-        el.height = 0;
+        registry.byId.clear();
+        // dispose() is async and may settle AFTER the next canvas has been
+        // mounted into the same host, so only remove this canvas's own nodes
+        // (never clear the host). Hide it right away so the two never overlap.
+        const wrapper = el.parentElement !== host ? el.parentElement : null;
+        if (wrapper) wrapper.style.display = 'none';
+        void fab.dispose().finally(() => {
+          wrapper?.remove();
+          el.remove();
+        });
       };
-      // Re-create the Fabric canvas whenever the displayed page size changes
-      // (fit-to-container re-scales the page) so the overlay always matches.
-    }, [sizeKey]);
+    }, [sizeKey, latest]);
 
     useEffect(() => {
       const fab = fabricRef.current;
-      if (!fab) return;
-      const interactive = !textSelectable;
-      const isDraw = tool === 'rect';
-      fab.set({
-        skipTargetFind: isDraw || !interactive,
-        selection: !isDraw && interactive,
-        hoverCursor: isDraw ? 'crosshair' : 'default',
-      });
-      fab.discardActiveObject();
-      fab.requestRenderAll();
-    }, [tool, textSelectable]);
+      if (fab) reconcile(fab, registryRef.current, redactions, viewport);
+    }, [redactions, viewport]);
 
-    // Text tool: convert the browser's native text selection into redaction
-    // rects on mouse-up. The overlay is inert while textSelectable (pointer
-    // events go to the pdf.js TextLayer), so we listen on the document and
-    // read window.getSelection() rather than any Fabric event.
     useEffect(() => {
-      if (!textSelectable) return;
+      const fab = fabricRef.current;
+      if (fab) applyModes(fab, tool, disabled);
+    }, [tool, disabled]);
 
-      const commitSelection = () => {
+    // Text tool: turn the browser's native selection INSIDE the text layer
+    // into one box per line on mouse-up.
+    useEffect(() => {
+      if (tool !== 'text' || disabled) return;
+      const commit = () => {
         const sel = window.getSelection();
-        const fab = fabricRef.current;
-        const canvasEl = canvasElRef.current;
-        if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !fab || !canvasEl) return;
-
+        const layer = textLayerRef.current;
+        const host = hostRef.current;
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !layer || !host) return;
         const clientRects: DOMRect[] = [];
         for (let i = 0; i < sel.rangeCount; i++) {
-          for (const r of Array.from(sel.getRangeAt(i).getClientRects())) clientRects.push(r);
+          const range = sel.getRangeAt(i);
+          if (!layer.contains(range.commonAncestorContainer)) continue;
+          clientRects.push(...Array.from(range.getClientRects()));
         }
         if (clientRects.length === 0) return;
-
-        const origin = canvasEl.getBoundingClientRect();
-        const lines = groupSelectionRects(clientRects, origin.left, origin.top);
-
-        // 1px bleed so the box fully covers ascenders / descenders.
-        const PAD = 1;
-        let added = false;
-        for (const l of lines) {
-          if (l.width < 1 || l.height < 1) continue;
-          fab.add(makeRedactionRect(l.left - PAD, l.top - PAD, l.width + PAD * 2, l.height + PAD * 2));
-          added = true;
-        }
-        if (!added) return;
-
-        fab.requestRenderAll();
-        emitChange();
+        const origin = host.getBoundingClientRect();
+        const vp = latest.current.viewport;
+        const pad = 1; // bleed so ascenders/descenders are fully covered
+        const added: Redaction[] = groupSelectionRects(clientRects, origin.left, origin.top)
+          .filter((l) => l.width >= 1 && l.height >= 1)
+          .map((l) => ({
+            id: newRedactionId(),
+            rect: viewportRectToPdf(
+              vp,
+              l.left - pad,
+              l.top - pad,
+              l.width + pad * 2,
+              l.height + pad * 2,
+            ),
+          }));
         sel.removeAllRanges();
+        if (added.length > 0) latest.current.onAdd(added);
       };
-
-      document.addEventListener('mouseup', commitSelection);
-      return () => document.removeEventListener('mouseup', commitSelection);
-      // emitChange only reads refs, so it is stable across renders.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [textSelectable]);
+      document.addEventListener('mouseup', commit);
+      return () => document.removeEventListener('mouseup', commit);
+    }, [tool, disabled, textLayerRef, latest]);
 
     return (
       <div
-        className="absolute inset-0 touch-none"
-        style={{ pointerEvents: textSelectable ? 'none' : 'auto' }}
-      >
-        <canvas
-          ref={canvasElRef}
-          className="absolute inset-0 touch-none"
-          aria-label="Redaction overlay"
-        />
-      </div>
+        ref={hostRef}
+        className="absolute inset-0 z-[5] touch-none"
+        style={{ pointerEvents: tool === 'text' || disabled ? 'none' : 'auto' }}
+        data-testid="redaction-overlay"
+      />
     );
   },
 );

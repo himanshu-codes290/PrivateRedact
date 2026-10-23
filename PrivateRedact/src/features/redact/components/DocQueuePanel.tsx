@@ -1,68 +1,148 @@
-import { FileText, CheckCircle, ArrowLeft } from 'lucide-react';
-import type { UploadedFileItem } from '@/features/redact/components/UploadDocument';
+import { useRef } from 'react';
+import { ArrowLeft, FilePlus, FileText, Lock, X } from 'lucide-react';
+import { formatBytes, type QueuedFile } from '@/features/redact/lib/fileIntake';
 
-interface DocQueuePanelProps {
-  files: UploadedFileItem[];
-  activeId?: string;
-  onSelect: (id: string) => void;
-  onReset: () => void;
+export interface FileProgress {
+  boxes: number;
+  pages: number;
 }
 
-/**
- * Left-hand queue listing every uploaded PDF. Selecting a file swaps the
- * viewer in the workspace.
- */
-export function DocQueuePanel({ files, activeId, onSelect, onReset }: DocQueuePanelProps) {
+interface DocQueuePanelProps {
+  files: readonly QueuedFile[];
+  activeId?: string;
+  progress: Readonly<Record<string, FileProgress>>;
+  onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
+  onAddFiles: (files: File[]) => void;
+  onBackToUpload: () => void;
+  disabled?: boolean;
+}
+
+/** Left-hand queue: switch, add and remove documents. */
+export function DocQueuePanel({
+  files,
+  activeId,
+  progress,
+  onSelect,
+  onRemove,
+  onAddFiles,
+  onBackToUpload,
+  disabled = false,
+}: DocQueuePanelProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const remove = (file: QueuedFile) => {
+    const boxes = progress[file.id]?.boxes ?? 0;
+    const ok =
+      boxes === 0 ||
+      window.confirm(
+        `Remove ${file.name}? Its ${boxes} redaction box${boxes === 1 ? '' : 'es'} will be discarded.`,
+      );
+    if (ok) onRemove(file.id);
+  };
+
   return (
-    <aside className="w-72 shrink-0 border-r border-white/[0.06] bg-[#0a0a16] flex flex-col">
-      <div className="px-4 py-4 border-b border-white/[0.06]">
-        <h2 className="text-sm font-bold text-white flex items-center gap-2">
-          <FileText className="w-4 h-4 text-violet-400" />
-          Document Queue
-          <span className="ml-auto inline-flex items-center justify-center w-5 h-5 rounded-full bg-violet-500/20 text-violet-300 text-[10px] font-bold">
+    <aside
+      className="hidden w-72 shrink-0 flex-col border-r border-white/[0.06] bg-[#0a0a16] lg:flex"
+      aria-label="Document queue"
+    >
+      <div className="border-b border-white/[0.06] px-4 py-4">
+        <h2 className="flex items-center gap-2 text-sm font-bold text-white">
+          <FileText className="h-4 w-4 text-violet-400" aria-hidden="true" />
+          Documents
+          <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-500/20 px-1.5 text-[10px] font-bold text-violet-300">
             {files.length}
           </span>
         </h2>
-        <p className="text-[11px] text-gray-600 mt-1">Select a file to redact</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-        {files.map((item, index) => {
-          const isActive = item.id === activeId;
+      <ul className="flex-1 space-y-1.5 overflow-y-auto p-2">
+        {files.map((item) => {
+          const active = item.id === activeId;
+          const p = progress[item.id];
           return (
-            <button
-              key={item.id}
-              onClick={() => onSelect(item.id)}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all border ${
-                isActive
-                  ? 'border-violet-500/40 bg-violet-500/10'
-                  : 'border-transparent hover:bg-white/[0.04]'
-              }`}
-            >
-              <div className="w-9 h-9 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0">
-                <FileText className={`w-4 h-4 ${isActive ? 'text-violet-300' : 'text-violet-500/70'}`} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={`text-[13px] font-medium truncate ${isActive ? 'text-white' : 'text-gray-300'}`}>
-                  {item.name}
-                </p>
-                <p className="text-[11px] text-gray-600">
-                  File {index + 1} · {item.size} MB
-                </p>
-              </div>
-              <CheckCircle className="w-4 h-4 text-emerald-500/80 shrink-0" />
-            </button>
+            <li key={item.id} className="group relative">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onSelect(item.id)}
+                aria-current={active ? 'true' : undefined}
+                className={`flex w-full items-center gap-3 rounded-xl border p-3 pr-9 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-500 ${
+                  active
+                    ? 'border-violet-500/40 bg-violet-500/10'
+                    : 'border-transparent hover:bg-white/[0.04]'
+                }`}
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10">
+                  {item.encrypted ? (
+                    <Lock className="h-4 w-4 text-amber-400" aria-hidden="true" />
+                  ) : (
+                    <FileText
+                      className={`h-4 w-4 ${active ? 'text-violet-300' : 'text-violet-500/70'}`}
+                      aria-hidden="true"
+                    />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={`block truncate text-[13px] font-medium ${active ? 'text-white' : 'text-gray-300'}`}
+                  >
+                    {item.name}
+                  </span>
+                  <span className="block text-[11px] text-gray-500">
+                    {formatBytes(item.size)}
+                    {item.encrypted
+                      ? ' · encrypted'
+                      : p && p.boxes > 0
+                        ? ` · ${p.boxes} box${p.boxes === 1 ? '' : 'es'} on ${p.pages} page${p.pages === 1 ? '' : 's'}`
+                        : ' · no boxes yet'}
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => remove(item)}
+                aria-label={`Remove ${item.name}`}
+                className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-gray-500 opacity-60 transition hover:bg-white/10 hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </li>
           );
         })}
-      </div>
+      </ul>
 
-      <div className="p-3 border-t border-white/[0.06]">
+      <div className="space-y-1 border-t border-white/[0.06] p-3">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          multiple
+          hidden
+          onChange={(e) => {
+            const list = Array.from(e.target.files ?? []);
+            e.target.value = '';
+            if (list.length > 0) onAddFiles(list);
+          }}
+        />
         <button
-          onClick={onReset}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-semibold text-gray-400 hover:text-white hover:bg-white/[0.06] transition-all"
+          type="button"
+          disabled={disabled}
+          onClick={() => inputRef.current?.click()}
+          className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold text-violet-300 transition-colors hover:bg-violet-500/10"
         >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Upload
+          <FilePlus className="h-4 w-4" aria-hidden="true" />
+          Add PDFs
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onBackToUpload}
+          className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Start over
         </button>
       </div>
     </aside>

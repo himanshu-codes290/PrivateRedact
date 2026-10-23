@@ -1,0 +1,1 @@
+cd PrivateRedact && npx lint-staged
